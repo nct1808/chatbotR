@@ -338,27 +338,22 @@ class GoogleDriveRAGChatbot:
                 return {'action': 'translate', 'target_language': 'en', 'target_language_name': 'English'}
         return None
     
-    def authenticate_google_drive(self, force_new_auth: bool = False) -> bool:
-        """Xác thực Google Drive với auto OAuth flow"""
+    def authenticate_google_drive(self) -> bool:
+        """Xác thực Google Drive"""
         try:
             creds = None
-            
-            # Force new auth nếu cần đổi account
-            if not force_new_auth and os.path.exists(TOKEN_FILE):
+            if os.path.exists(TOKEN_FILE):
                 with open(TOKEN_FILE, 'rb') as token:
                     creds = pickle.load(token)
             
-            if not creds or not creds.valid or force_new_auth:
-                if creds and creds.expired and creds.refresh_token and not force_new_auth:
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                 else:
                     if not os.path.exists(CREDENTIALS_FILE):
                         st.error("❌ Không tìm thấy credentials.json")
                         return False
-                    
                     flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-                    # Auto local server - works with Streamlit
-                    st.info("🌐 Opening browser for Google authentication...")
                     creds = flow.run_local_server(port=0)
                 
                 with open(TOKEN_FILE, 'wb') as token:
@@ -922,70 +917,60 @@ def main():
         # Google Drive settings with folder browser
         if data_source == "Google Drive":
             with st.expander("🗄️ Google Drive Browser", expanded=True):
-                # Connection status and controls
-                if st.session_state.get('drive_connected'):
+                # Connection status
+                if 'drive_connected' in st.session_state and st.session_state.drive_connected:
                     user_info = st.session_state.get('drive_user', {})
-                    st.success(f"✅ Connected: {user_info.get('displayName', 'Unknown User')}")
+                    st.success(f"✅ Connected: {user_info.get('displayName', 'Unknown')}")
                     
-                    # Control buttons
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("🔄 Refresh Folders"):
+                    # Folder browser
+                    col1, col2 = st.columns([3, 1])
+                    with col2:
+                        if st.button("🔄 Refresh", help="Refresh folder list"):
                             if 'chatbot' in st.session_state and st.session_state.chatbot:
-                                with st.spinner("Refreshing..."):
+                                with st.spinner("Loading folders..."):
                                     st.session_state.drive_folders = st.session_state.chatbot.get_drive_folders()
                                 st.success("Folders refreshed!")
-                                st.rerun()
                     
-                    with col2:
-                        if st.button("🔄 Change Account"):
-                            # Clear token để force re-auth
-                            if os.path.exists(TOKEN_FILE):
-                                os.remove(TOKEN_FILE)
-                            st.session_state.drive_connected = False
-                            st.session_state.drive_user = {}
-                            st.session_state.drive_folders = []
-                            st.info("🔓 Disconnected. Click Connect to choose new account.")
-                            st.rerun()
+                    # Initialize folder list if not exists
+                    if 'drive_folders' not in st.session_state:
+                        st.session_state.drive_folders = []
                     
-                    # Folder selector
-                    folders = st.session_state.get('drive_folders', [])
-                    if folders:
-                        options = ["🌟 All Files"] + [f"📁 {f['name']}" for f in folders]
-                        selected = st.selectbox("Select folder:", options)
+                    # Display folders
+                    if st.session_state.drive_folders:
+                        st.markdown("### 📁 Select Folder:")
                         
-                        if selected == "🌟 All Files":
+                        # Add "All files" option
+                        folder_options = ["🌟 All Files (No folder filter)"] + [f"📁 {f.get('name', 'Unknown')}" for f in st.session_state.drive_folders]
+                        
+                        selected_idx = st.selectbox(
+                            "Choose folder:",
+                            range(len(folder_options)),
+                            format_func=lambda x: folder_options[x],
+                            help="Select a folder to load documents from"
+                        )
+                        
+                        if selected_idx == 0:
                             folder_id = None
-                            st.info("📂 Will load all accessible files")
+                            st.info("📂 All accessible files will be loaded")
                         else:
-                            idx = options.index(selected) - 1
-                            folder_id = folders[idx]['id']
-                            st.success(f"📁 Selected: {folders[idx]['name']}")
+                            folder_id = st.session_state.drive_folders[selected_idx - 1]['id']
+                            folder_name = st.session_state.drive_folders[selected_idx - 1]['name']
+                            st.success(f"📁 Selected: {folder_name}")
+                            st.caption(f"ID: {folder_id}")
                     else:
                         folder_id = None
-                        st.info("📂 No folders found. Click Refresh or use All Files.")
-                
+                        st.info("📂 No folders found or click Refresh to load")
+                        
+                    # Disconnect option
+                    if st.button("🔌 Disconnect", help="Disconnect from Google Drive"):
+                        st.session_state.drive_connected = False
+                        st.session_state.drive_user = {}
+                        st.session_state.drive_folders = []
+                        st.success("Disconnected from Google Drive")
+                        st.rerun()
+                        
                 else:
-                    # Not connected - show connect button
-                    st.warning("🔗 Not connected to Google Drive")
-                    
-                    if st.button("🔗 Connect to Google Drive", type="primary"):
-                        if 'chatbot' not in st.session_state:
-                            # Initialize chatbot for authentication
-                            st.session_state.temp_chatbot = GoogleDriveRAGChatbot()
-                        
-                        chatbot = st.session_state.get('chatbot') or st.session_state.get('temp_chatbot')
-                        
-                        with st.spinner("🔐 Authenticating... Browser will open"):
-                            if chatbot.authenticate_google_drive():
-                                st.session_state.drive_connected = True
-                                st.session_state.drive_user = chatbot.get_user_info()
-                                st.session_state.drive_folders = chatbot.get_drive_folders()
-                                st.success("✅ Connected successfully!")
-                                st.rerun()
-                            else:
-                                st.error("❌ Connection failed")
-                    
+                    st.warning("🔗 Click 'Connect & Load Documents' to connect to Google Drive")
                     folder_id = None
         else:
             folder_id = None
@@ -1109,24 +1094,38 @@ def main():
                         
                         # Process Google Drive files
                         if data_source == "Google Drive":
-                            if st.session_state.get('drive_connected') and folder_id is not None or st.session_state.get('drive_connected'):
-                                # Use existing connection and selected folder
-                                chatbot.drive_service = st.session_state.get('temp_chatbot', chatbot).drive_service
+                            if chatbot.authenticate_google_drive():
+                                st.success("✅ Google Drive connected!")
                                 
-                                files = chatbot.get_files_from_drive(folder_id, file_types, max_files)
+                                # Store connection status and get user info
+                                st.session_state.drive_connected = True
+                                st.session_state.drive_user = chatbot.get_user_info()
+                                st.session_state.drive_folders = chatbot.get_drive_folders()
+                                
+                                # Show folder info
+                                if st.session_state.drive_folders:
+                                    st.info(f"📁 Found {len(st.session_state.drive_folders)} folders")
+                                
+                                files = chatbot.get_files_from_drive(
+                                    folder_id,
+                                    file_types,
+                                    max_files
+                                )
+                                
                                 if files:
-                                    folder_name = "All files" if not folder_id else next(
-                                        (f['name'] for f in st.session_state.get('drive_folders', []) if f['id'] == folder_id), 
-                                        "Selected folder"
-                                    )
-                                    st.info(f"📁 Found {len(files)} files in '{folder_name}'")
+                                    if folder_id:
+                                        folder_name = next((f['name'] for f in st.session_state.drive_folders if f['id'] == folder_id), "Selected folder")
+                                        st.info(f"📁 Found {len(files)} files in '{folder_name}'")
+                                    else:
+                                        st.info(f"📁 Found {len(files)} files (all accessible)")
+                                    
                                     drive_docs = chatbot.process_documents(files)
                                     if drive_docs:
                                         chatbot.create_drive_vector_store(drive_docs)
                                 else:
                                     st.warning("⚠️ No files found in selected location")
                             else:
-                                st.error("❌ Please connect to Google Drive first in the sidebar")
+                                st.error("❌ Could not connect to Google Drive")
                                 return
                         
                         # Process uploaded files
