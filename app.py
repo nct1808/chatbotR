@@ -366,32 +366,6 @@ class GoogleDriveRAGChatbot:
             st.error(f"❌ Lỗi xác thực: {e}")
             return False
     
-    def get_drive_folders(self) -> List[Dict]:
-        """Lấy danh sách folders từ Google Drive"""
-        if not self.drive_service:
-            return []
-        try:
-            results = self.drive_service.files().list(
-                q="mimeType='application/vnd.google-apps.folder' and trashed=false",
-                fields="files(id, name, parents)",
-                pageSize=100
-            ).execute()
-            return results.get('files', [])
-        except Exception as e:
-            logger.error(f"Error getting folders: {e}")
-            return []
-
-    def get_user_info(self) -> Dict:
-        """Lấy thông tin user đã connect"""
-        if not self.drive_service:
-            return {}
-        try:
-            user = self.drive_service.about().get(fields="user").execute()
-            return user.get('user', {})
-        except Exception as e:
-            logger.error(f"Error getting user info: {e}")
-            return {}
-    
     def get_files_from_drive(self, folder_id: Optional[str] = None, 
                            file_types: Optional[List[str]] = None, max_files: int = 100) -> List[Dict]:
         """Lấy files từ Google Drive"""
@@ -860,13 +834,6 @@ def main():
         margin: 0.5rem 0;
         border-radius: 5px;
     }
-    .folder-browser {
-        background: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 5px;
-        padding: 0.5rem;
-        margin: 0.5rem 0;
-    }
     </style>
     """, unsafe_allow_html=True)
     
@@ -874,7 +841,7 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>🤖 Enhanced RAG Chatbot</h1>
-        <p>AI Assistant with Memory, Learning & Google Drive Browser</p>
+        <p>AI Assistant with Memory, Learning & Separate Data Sources</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -914,64 +881,14 @@ def main():
             else:
                 st.info("🧠 Memory: Fresh start")
         
-        # Google Drive settings with folder browser
+        # Google Drive settings
         if data_source == "Google Drive":
-            with st.expander("🗄️ Google Drive Browser", expanded=True):
-                # Connection status
-                if 'drive_connected' in st.session_state and st.session_state.drive_connected:
-                    user_info = st.session_state.get('drive_user', {})
-                    st.success(f"✅ Connected: {user_info.get('displayName', 'Unknown')}")
-                    
-                    # Folder browser
-                    col1, col2 = st.columns([3, 1])
-                    with col2:
-                        if st.button("🔄 Refresh", help="Refresh folder list"):
-                            if 'chatbot' in st.session_state and st.session_state.chatbot:
-                                with st.spinner("Loading folders..."):
-                                    st.session_state.drive_folders = st.session_state.chatbot.get_drive_folders()
-                                st.success("Folders refreshed!")
-                    
-                    # Initialize folder list if not exists
-                    if 'drive_folders' not in st.session_state:
-                        st.session_state.drive_folders = []
-                    
-                    # Display folders
-                    if st.session_state.drive_folders:
-                        st.markdown("### 📁 Select Folder:")
-                        
-                        # Add "All files" option
-                        folder_options = ["🌟 All Files (No folder filter)"] + [f"📁 {f.get('name', 'Unknown')}" for f in st.session_state.drive_folders]
-                        
-                        selected_idx = st.selectbox(
-                            "Choose folder:",
-                            range(len(folder_options)),
-                            format_func=lambda x: folder_options[x],
-                            help="Select a folder to load documents from"
-                        )
-                        
-                        if selected_idx == 0:
-                            folder_id = None
-                            st.info("📂 All accessible files will be loaded")
-                        else:
-                            folder_id = st.session_state.drive_folders[selected_idx - 1]['id']
-                            folder_name = st.session_state.drive_folders[selected_idx - 1]['name']
-                            st.success(f"📁 Selected: {folder_name}")
-                            st.caption(f"ID: {folder_id}")
-                    else:
-                        folder_id = None
-                        st.info("📂 No folders found or click Refresh to load")
-                        
-                    # Disconnect option
-                    if st.button("🔌 Disconnect", help="Disconnect from Google Drive"):
-                        st.session_state.drive_connected = False
-                        st.session_state.drive_user = {}
-                        st.session_state.drive_folders = []
-                        st.success("Disconnected from Google Drive")
-                        st.rerun()
-                        
-                else:
-                    st.warning("🔗 Click 'Connect & Load Documents' to connect to Google Drive")
-                    folder_id = None
+            with st.expander("🗄️ Google Drive Settings", expanded=True):
+                folder_id = st.text_input(
+                    "📁 Folder ID (optional)",
+                    value=os.getenv('GOOGLE_DRIVE_FOLDER_ID', ''),
+                    help="Leave empty to read all files"
+                )
         else:
             folder_id = None
         
@@ -1061,12 +978,6 @@ def main():
         st.session_state.documents_loaded = False
     if 'file_uploader_key' not in st.session_state:
         st.session_state.file_uploader_key = 0
-    if 'drive_connected' not in st.session_state:
-        st.session_state.drive_connected = False
-    if 'drive_user' not in st.session_state:
-        st.session_state.drive_user = {}
-    if 'drive_folders' not in st.session_state:
-        st.session_state.drive_folders = []
     
     # Main content
     col1, col2 = st.columns([2, 1])
@@ -1097,15 +1008,6 @@ def main():
                             if chatbot.authenticate_google_drive():
                                 st.success("✅ Google Drive connected!")
                                 
-                                # Store connection status and get user info
-                                st.session_state.drive_connected = True
-                                st.session_state.drive_user = chatbot.get_user_info()
-                                st.session_state.drive_folders = chatbot.get_drive_folders()
-                                
-                                # Show folder info
-                                if st.session_state.drive_folders:
-                                    st.info(f"📁 Found {len(st.session_state.drive_folders)} folders")
-                                
                                 files = chatbot.get_files_from_drive(
                                     folder_id,
                                     file_types,
@@ -1113,17 +1015,12 @@ def main():
                                 )
                                 
                                 if files:
-                                    if folder_id:
-                                        folder_name = next((f['name'] for f in st.session_state.drive_folders if f['id'] == folder_id), "Selected folder")
-                                        st.info(f"📁 Found {len(files)} files in '{folder_name}'")
-                                    else:
-                                        st.info(f"📁 Found {len(files)} files (all accessible)")
-                                    
+                                    st.info(f"📁 Found {len(files)} Drive files")
                                     drive_docs = chatbot.process_documents(files)
                                     if drive_docs:
                                         chatbot.create_drive_vector_store(drive_docs)
                                 else:
-                                    st.warning("⚠️ No files found in selected location")
+                                    st.warning("⚠️ No Drive files found")
                             else:
                                 st.error("❌ Could not connect to Google Drive")
                                 return
@@ -1152,8 +1049,7 @@ def main():
                                 'total_documents': total_docs,
                                 'total_chunks': sum(len(chatbot.text_splitter.split_text(doc.page_content)) for doc in drive_docs + upload_docs),
                                 'data_source': data_source,
-                                'memory_conversations': len(chatbot.conversation_memory),
-                                'selected_folder': folder_id
+                                'memory_conversations': len(chatbot.conversation_memory)
                             }
                             
                             st.success("🎉 System ready with memory & learning!")
@@ -1198,14 +1094,6 @@ def main():
                 - 🧠 Memory: {stats.get('memory_conversations', 0)} conversations
                 """)
                 
-                # Show folder info for Drive
-                if stats.get('data_source') == "Google Drive":
-                    if stats.get('selected_folder'):
-                        folder_name = next((f['name'] for f in st.session_state.get('drive_folders', []) if f['id'] == stats['selected_folder']), "Unknown")
-                        st.caption(f"📁 Folder: {folder_name}")
-                    else:
-                        st.caption("📂 Source: All accessible files")
-                
                 # Show learning insights
                 if 'chatbot' in st.session_state and st.session_state.chatbot.user_preferences['frequently_asked_topics']:
                     topics = st.session_state.chatbot.user_preferences['frequently_asked_topics']
@@ -1217,11 +1105,6 @@ def main():
         
         with st.expander("💡 Usage Tips"):
             st.markdown("""
-            **New Features:**
-            - 🗄️ **Folder Browser**: Browse and select Drive folders
-            - 🔄 **Auto-refresh**: Real-time folder updates
-            - 👤 **User Info**: See connected Google account
-            
             **System Status:**
             - API Key: ✅ Pre-configured
             - Memory: 🧠 Learning enabled
@@ -1243,7 +1126,7 @@ def main():
             - Adapts to your question patterns
             """)
     
-    # Chat interface (rest remains the same...)
+    # Chat interface
     if st.session_state.documents_loaded and st.session_state.chatbot:
         st.markdown("---")
         st.header("💬 Chat with AI")
@@ -1475,11 +1358,10 @@ def main():
             
             with col_feat1:
                 st.markdown("""
-                **🗄️ Google Drive Browser:**
-                - Visual folder selection
-                - Browse all your folders
-                - Connected user display
-                - Real-time folder refresh
+                **🤖 Smart Embedding Storage:**
+                - Intelligent caching for embeddings
+                - Separate vector stores by source
+                - Faster loading times
                 """)
             
             with col_feat2:
