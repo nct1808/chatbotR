@@ -116,6 +116,7 @@ class GoogleDriveRAGChatbot:
             'chinese': 'zh', 'trung quốc': 'zh', 'trung': 'zh',
             'japanese': 'ja', 'nhật bản': 'ja', 'nhật': 'ja',
             'korean': 'ko', 'hàn quốc': 'ko', 'hàn': 'ko',
+            'hangul': 'ko', 'tiếng hàn': 'ko',
             'french': 'fr', 'pháp': 'fr', 'german': 'de', 'đức': 'de',
             'spanish': 'es', 'tây ban nha': 'es',
             'vietnamese': 'vi', 'việt nam': 'vi', 'việt': 'vi'
