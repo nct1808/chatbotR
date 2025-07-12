@@ -941,6 +941,8 @@ def main():
             - "dịch sang tiếng Anh"
             - "translate to English"
             - "dịch sang Chinese"
+            - "dịch sang tiếng Hàn"
+            - "dịch sang Korean" 
             """)
         
         file_types = st.multiselect(
