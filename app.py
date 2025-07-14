@@ -30,7 +30,7 @@ import numpy as np
 load_dotenv()
 
 # FIXED API KEY - Change only in code
-FIXED_OPENAI_API_KEY = "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"  # Thay thế bằng API key của bạn
+FIXED_OPENAI_API_KEY = "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"  # Thay thế bằng API key của bạn
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
