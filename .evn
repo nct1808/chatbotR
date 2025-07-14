@@ -1,13 +1,9 @@
 
 OPENAI_API_KEY=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
 GOOGLE_DRIVE_FOLDER_ID=your-google-drive-folder-id-here
-
-# App Configuration
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=100
 MAX_SEARCH_RESULTS=5
 MAX_FILE_SIZE_MB=50
-
-# Additional Settings (Optional)
 APP_DEBUG=False
 LOG_LEVEL=INFO
