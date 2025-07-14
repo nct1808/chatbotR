@@ -29,11 +29,8 @@ import numpy as np
 # Load environment variables
 load_dotenv()
 
-# API KEY - Sử dụng biến môi trường (An toàn)
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-
-if not OPENAI_API_KEY:
-    raise ValueError("❌ OPENAI_API_KEY not found. Please set it in .env file")
+# FIXED API KEY - Change only in code
+FIXED_OPENAI_API_KEY = "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"  # Thay thế bằng API key của bạn
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
@@ -51,19 +48,17 @@ TRANSLATION_CACHE_DIR = 'translation_cache'
 class GoogleDriveRAGChatbot:
     def __init__(self, openai_api_key: Optional[str] = None):
         """Khởi tạo chatbot RAG với OpenAI API"""
-        # Use environment variable API key
-        self.openai_api_key = openai_api_key or OPENAI_API_KEY
+        # Use fixed API key
+        self.openai_api_key = FIXED_OPENAI_API_KEY
         
         if not self.openai_api_key:
             raise ValueError("OpenAI API Key not configured")
         
-        # Cấu hình OpenAI - CÙNG API KEY cho cả chat và embedding
+        # Cấu hình OpenAI
         self.client = OpenAI(api_key=self.openai_api_key)
-        
-        # ✅ FIX: Embedding dùng chung API key với chat
         self.embeddings = OpenAIEmbeddings(
             model="text-embedding-3-large",
-            openai_api_key=self.openai_api_key  # Explicit API key
+            openai_api_key=self.openai_api_key
         )
         
         # Cấu hình
@@ -569,38 +564,26 @@ class GoogleDriveRAGChatbot:
         # Create new embeddings with BATCH PROCESSING
         if texts_to_embed:
             with st.spinner(f"🤖 Creating embeddings for {source_type} files..."):
-                batch_size = 10  # Reduced batch size for stability
+                batch_size = 20  # Process 20 chunks at once
                 progress_bar = st.progress(0)
-                
-                st.info(f"📊 Processing {len(texts_to_embed)} text chunks in batches of {batch_size}")
                 
                 for i in range(0, len(texts_to_embed), batch_size):
                     batch = texts_to_embed[i:i + batch_size]
                     
-                    try:
-                        # Prepare batch texts
-                        batch_texts = [text_doc.page_content for text_doc, _ in batch]
-                        
-                        # Single API call for entire batch with error handling
-                        batch_embeddings = self.embeddings.embed_documents(batch_texts)
-                        
-                        # Cache all batch results
-                        for j, (text_doc, text_hash) in enumerate(batch):
-                            self.embedding_cache[text_hash] = batch_embeddings[j]
-                            cached_embeddings.append((text_doc, batch_embeddings[j]))
-                        
-                        # Update progress
-                        progress = min((i + batch_size) / len(texts_to_embed), 1.0)
-                        progress_bar.progress(progress)
-                        
-                        # Small delay to avoid rate limiting
-                        import time
-                        time.sleep(0.1)
-                        
-                    except Exception as e:
-                        st.error(f"❌ Error processing batch {i//batch_size + 1}: {str(e)}")
-                        # Continue with next batch instead of failing completely
-                        continue
+                    # Prepare batch texts
+                    batch_texts = [text_doc.page_content for text_doc, _ in batch]
+                    
+                    # Single API call for entire batch - Much faster with OpenAI!
+                    batch_embeddings = self.embeddings.embed_documents(batch_texts)
+                    
+                    # Cache all batch results
+                    for j, (text_doc, text_hash) in enumerate(batch):
+                        self.embedding_cache[text_hash] = batch_embeddings[j]
+                        cached_embeddings.append((text_doc, batch_embeddings[j]))
+                    
+                    # Update progress
+                    progress = min((i + batch_size) / len(texts_to_embed), 1.0)
+                    progress_bar.progress(progress)
                 
                 progress_bar.empty()
         
@@ -893,26 +876,13 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # API Key validation with debugging
+        # API Key status
         st.markdown("### 🔑 OpenAI API Status")
-        if OPENAI_API_KEY:
-            # Show partial key for security
-            masked_key = OPENAI_API_KEY[:10] + "*" * 20 + OPENAI_API_KEY[-4:]
-            st.success(f"✅ OpenAI API Key: {masked_key}")
-            
-            # Test API key validity
-            try:
-                import openai
-                test_client = openai.OpenAI(api_key=OPENAI_API_KEY)
-                # Quick test call
-                test_client.models.list()
-                st.success("✅ API Key validated successfully")
-            except Exception as e:
-                st.error(f"❌ API Key validation failed: {str(e)}")
-                st.warning("Please check your API key in .env file")
+        if FIXED_OPENAI_API_KEY and FIXED_OPENAI_API_KEY != "your-openai-api-key-here":
+            st.success("✅ OpenAI API Key: Configured")
         else:
-            st.error("❌ Please set OPENAI_API_KEY in .env file")
-            st.code("OPENAI_API_KEY=sk-proj-your-actual-key", language="bash")
+            st.error("❌ Please set your OpenAI API Key in the code")
+            st.code('FIXED_OPENAI_API_KEY = "your-actual-api-key"')
         
         # Data source selection with memory
         st.markdown("### 📊 Data Sources")
@@ -1043,8 +1013,8 @@ def main():
     
     with col1:
         if st.button("🚀 Connect & Load Documents", type="primary"):
-            if not OPENAI_API_KEY:
-                st.error("❌ Please set OPENAI_API_KEY in .env file")
+            if not FIXED_OPENAI_API_KEY or FIXED_OPENAI_API_KEY == "your-openai-api-key-here":
+                st.error("❌ Please set your OpenAI API Key in the code")
             else:
                 with st.spinner("🔄 Initializing..."):
                     try:
