@@ -1,4 +1,4 @@
-def __import os
+import os
 import json
 import pickle
 import logging
