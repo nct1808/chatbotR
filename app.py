@@ -1,4 +1,4 @@
-import os
+def __import os
 import json
 import pickle
 import logging
@@ -29,8 +29,11 @@ import numpy as np
 # Load environment variables
 load_dotenv()
 
-# FIXED API KEY - Change only in code
-FIXED_OPENAI_API_KEY = "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"  # Thay thế bằng API key của bạn
+# API KEY - Sử dụng biến môi trường (An toàn)
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+if not OPENAI_API_KEY:
+    raise ValueError("❌ OPENAI_API_KEY not found. Please set it in .env file")
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
@@ -48,8 +51,8 @@ TRANSLATION_CACHE_DIR = 'translation_cache'
 class GoogleDriveRAGChatbot:
     def __init__(self, openai_api_key: Optional[str] = None):
         """Khởi tạo chatbot RAG với OpenAI API"""
-        # Use fixed API key
-        self.openai_api_key = FIXED_OPENAI_API_KEY
+        # Use environment variable API key
+        self.openai_api_key = openai_api_key or OPENAI_API_KEY
         
         if not self.openai_api_key:
             raise ValueError("OpenAI API Key not configured")
@@ -878,11 +881,13 @@ def main():
         
         # API Key status
         st.markdown("### 🔑 OpenAI API Status")
-        if FIXED_OPENAI_API_KEY and FIXED_OPENAI_API_KEY != "your-openai-api-key-here":
-            st.success("✅ OpenAI API Key: Configured")
+        if OPENAI_API_KEY:
+            # Show partial key for security
+            masked_key = OPENAI_API_KEY[:10] + "*" * 20 + OPENAI_API_KEY[-4:]
+            st.success(f"✅ OpenAI API Key: {masked_key}")
         else:
-            st.error("❌ Please set your OpenAI API Key in the code")
-            st.code('FIXED_OPENAI_API_KEY = "your-actual-api-key"')
+            st.error("❌ Please set OPENAI_API_KEY in .env file")
+            st.code("OPENAI_API_KEY=sk-proj-your-actual-key", language="bash")
         
         # Data source selection with memory
         st.markdown("### 📊 Data Sources")
@@ -1013,8 +1018,8 @@ def main():
     
     with col1:
         if st.button("🚀 Connect & Load Documents", type="primary"):
-            if not FIXED_OPENAI_API_KEY or FIXED_OPENAI_API_KEY == "your-openai-api-key-here":
-                st.error("❌ Please set your OpenAI API Key in the code")
+            if not OPENAI_API_KEY:
+                st.error("❌ Please set OPENAI_API_KEY in .env file")
             else:
                 with st.spinner("🔄 Initializing..."):
                     try:
