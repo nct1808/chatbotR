@@ -30,7 +30,7 @@ import numpy as np
 load_dotenv()
 
 # FIXED API KEY - Change only in code
-FIXED_OPENAI_API_KEY = "your-openai-api-key-here"  # Thay thế bằng API key của bạn
+FIXED_OPENAI_API_KEY = "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"  # Thay thế bằng API key của bạn
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
