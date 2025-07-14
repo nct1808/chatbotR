@@ -11,10 +11,11 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import google.generativeai as genai
+import openai
+from openai import OpenAI
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain.docstore.document import Document
 import io
 from docx import Document as DocxDocument
@@ -29,7 +30,7 @@ import numpy as np
 load_dotenv()
 
 # FIXED API KEY - Change only in code
-FIXED_GEMINI_API_KEY = "AIzaSyDMcb__l3fJCDQ8Ug-jLxlUzRDTTIMhDcI"
+FIXED_OPENAI_API_KEY = "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"  # Thay thế bằng API key của bạn
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
@@ -45,20 +46,19 @@ EMBEDDING_CACHE_DIR = 'embedding_cache'
 TRANSLATION_CACHE_DIR = 'translation_cache'
 
 class GoogleDriveRAGChatbot:
-    def __init__(self, gemini_api_key: Optional[str] = None):
-        """Khởi tạo chatbot RAG với cấu hình nâng cao"""
+    def __init__(self, openai_api_key: Optional[str] = None):
+        """Khởi tạo chatbot RAG với OpenAI API"""
         # Use fixed API key
-        self.gemini_api_key = FIXED_GEMINI_API_KEY
+        self.openai_api_key = FIXED_OPENAI_API_KEY
         
-        if not self.gemini_api_key:
-            raise ValueError("API Key not configured")
+        if not self.openai_api_key:
+            raise ValueError("OpenAI API Key not configured")
         
-        # Cấu hình Gemini
-        genai.configure(api_key=self.gemini_api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash-8b')
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001",
-            google_api_key=self.gemini_api_key
+        # Cấu hình OpenAI
+        self.client = OpenAI(api_key=self.openai_api_key)
+        self.embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-large",
+            openai_api_key=self.openai_api_key
         )
         
         # Cấu hình
@@ -284,31 +284,47 @@ class GoogleDriveRAGChatbot:
         self.current_source = source
     
     def detect_language(self, text: str) -> str:
-        """Detect ngôn ngữ"""
+        """Detect ngôn ngữ sử dụng OpenAI GPT-4.1-mini"""
         try:
-            prompt = f"Detect language of this text and return only language code (en/vi/zh/ja/ko/fr/de/es): {text[:100]}"
-            response = self.model.generate_content(prompt)
-            lang = response.text.strip().lower()
+            response = self.client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {"role": "system", "content": "Detect the language of the given text and return only the language code (en/vi/zh/ja/ko/fr/de/es)."},
+                    {"role": "user", "content": f"Text: {text[:100]}"}
+                ],
+                max_tokens=10,
+                temperature=0
+            )
+            lang = response.choices[0].message.content.strip().lower()
             return lang if len(lang) == 2 else 'vi'
         except:
             return 'vi'
     
     def translate_text(self, text: str, target_language: str) -> str:
-        """Dịch text với caching"""
+        """Dịch text với OpenAI GPT-4.1-mini và caching"""
         cache_key = f"{self._get_hash(text)}_{target_language}"
         
         if cache_key in self.translation_cache:
             return self.translation_cache[cache_key]
         
         try:
-            lang_names = {'en': 'English', 'vi': 'Vietnamese', 'zh': 'Chinese', 
-                         'ja': 'Japanese', 'ko': 'Korean', 'fr': 'French', 
-                         'de': 'German', 'es': 'Spanish'}
+            lang_names = {
+                'en': 'English', 'vi': 'Vietnamese', 'zh': 'Chinese', 
+                'ja': 'Japanese', 'ko': 'Korean', 'fr': 'French', 
+                'de': 'German', 'es': 'Spanish'
+            }
             target_name = lang_names.get(target_language, target_language)
             
-            prompt = f"Translate to {target_name}, keep formatting:\n{text}"
-            response = self.model.generate_content(prompt)
-            translated = response.text.strip()
+            response = self.client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {"role": "system", "content": f"Translate the following text to {target_name}. Keep the original formatting and structure."},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.3
+            )
+            
+            translated = response.choices[0].message.content.strip()
             
             self.translation_cache[cache_key] = translated
             self._save_caches()
@@ -425,6 +441,7 @@ class GoogleDriveRAGChatbot:
         except Exception as e:
             logger.error(f"Content extraction error: {e}")
             return ""
+
     def download_file_content(self, file_id: str, mime_type: str, file_name: str) -> str:
         """Download và extract file content"""
         try:
@@ -544,7 +561,7 @@ class GoogleDriveRAGChatbot:
             else:
                 texts_to_embed.append((text_doc, text_hash))
         
-        # Create new embeddings with BATCH PROCESSING - Much faster!
+        # Create new embeddings with BATCH PROCESSING
         if texts_to_embed:
             with st.spinner(f"🤖 Creating embeddings for {source_type} files..."):
                 batch_size = 20  # Process 20 chunks at once
@@ -556,7 +573,7 @@ class GoogleDriveRAGChatbot:
                     # Prepare batch texts
                     batch_texts = [text_doc.page_content for text_doc, _ in batch]
                     
-                    # Single API call for entire batch - 20x faster!
+                    # Single API call for entire batch - Much faster with OpenAI!
                     batch_embeddings = self.embeddings.embed_documents(batch_texts)
                     
                     # Cache all batch results
@@ -620,7 +637,7 @@ class GoogleDriveRAGChatbot:
             return []
     
     def generate_answer(self, query: str, context_docs: List[Document], target_language: str = 'vi') -> Dict[str, Any]:
-        """Tạo câu trả lời với memory context và learning"""
+        """Tạo câu trả lời với OpenAI và memory context"""
         if not context_docs:
             return {
                 'answer': "🤔 Không tìm thấy thông tin liên quan trong tài liệu.",
@@ -654,7 +671,7 @@ class GoogleDriveRAGChatbot:
         if conversation_context:
             context_instruction = f"\n\nBỐI CẢNH CUỘC TRÒ CHUYỆN TRƯỚC:\n{conversation_context}"
         
-        prompt = f"""
+        system_prompt = f"""
 Bạn là AI assistant thông minh với khả năng ghi nhớ và học hỏi. Trả lời câu hỏi dựa trên tài liệu được cung cấp.
 
 NGUYÊN TẮC:
@@ -665,20 +682,29 @@ NGUYÊN TẮC:
 5. Học hỏi từ feedback để cải thiện
 {answer_length_instruction}
 
+NGUỒN DỮ LIỆU: {self.current_source.upper()}
+{context_instruction}
+"""
+        
+        user_prompt = f"""
 TÀI LIỆU HIỆN TẠI:
 {context}
-{context_instruction}
-
-NGUỒN DỮ LIỆU: {self.current_source.upper()}
 
 CÂU HỎI: {query}
-
-TRẢ LỜI:
 """
         
         try:
-            response = self.model.generate_content(prompt)
-            answer = response.text
+            response = self.client.chat.completions.create(
+                model="gpt-4.1-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=1500
+            )
+            
+            answer = response.choices[0].message.content
             
             # Learn from this interaction
             self.learn_from_interaction(query, answer)
@@ -797,7 +823,7 @@ TRẢ LỜI:
 # Streamlit UI
 def main():
     st.set_page_config(
-        page_title="Enhanced RAG Chatbot with Memory",
+        page_title="Enhanced RAG Chatbot with OpenAI",
         page_icon="🤖",
         layout="wide"
     )
@@ -842,7 +868,7 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>🤖 Enhanced RAG Chatbot</h1>
-        <p>AI Assistant with Memory, Learning & Separate Data Sources</p>
+        <p>AI Assistant with OpenAI GPT-4.1-mini & text-embedding-3-large</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -850,12 +876,13 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # API Key is now fixed - show status only
-        st.markdown("### 🔑 API Status")
-        if FIXED_GEMINI_API_KEY:
-            st.success("✅ Gemini API Key: Configured")
+        # API Key status
+        st.markdown("### 🔑 OpenAI API Status")
+        if FIXED_OPENAI_API_KEY and FIXED_OPENAI_API_KEY != "your-openai-api-key-here":
+            st.success("✅ OpenAI API Key: Configured")
         else:
-            st.error("❌ API Key not configured")
+            st.error("❌ Please set your OpenAI API Key in the code")
+            st.code('FIXED_OPENAI_API_KEY = "your-actual-api-key"')
         
         # Data source selection with memory
         st.markdown("### 📊 Data Sources")
@@ -941,8 +968,7 @@ def main():
             - "dịch sang tiếng Anh"
             - "translate to English"
             - "dịch sang Chinese"
-            - "dịch sang tiếng Hàn"
-            - "dịch sang Korean" 
+            - "dịch sang tiếng Hàn"   
             """)
         
         file_types = st.multiselect(
@@ -987,8 +1013,8 @@ def main():
     
     with col1:
         if st.button("🚀 Connect & Load Documents", type="primary"):
-            if not FIXED_GEMINI_API_KEY:
-                st.error("❌ API Key not configured in code")
+            if not FIXED_OPENAI_API_KEY or FIXED_OPENAI_API_KEY == "your-openai-api-key-here":
+                st.error("❌ Please set your OpenAI API Key in the code")
             else:
                 with st.spinner("🔄 Initializing..."):
                     try:
@@ -1055,7 +1081,7 @@ def main():
                                 'memory_conversations': len(chatbot.conversation_memory)
                             }
                             
-                            st.success("🎉 System ready with memory & learning!")
+                            st.success("🎉 System ready with OpenAI & memory!")
                             
                             # Show stats
                             stats = st.session_state.file_stats
@@ -1095,6 +1121,10 @@ def main():
                 - Files: {stats.get('total_files', 0)}
                 - Chunks: {stats.get('total_chunks', 0)}
                 - 🧠 Memory: {stats.get('memory_conversations', 0)} conversations
+                
+                **🤖 AI Models:**
+                - Chat: GPT-4.1-mini
+                - Embeddings: text-embedding-3-large
                 """)
                 
                 # Show learning insights
@@ -1109,7 +1139,8 @@ def main():
         with st.expander("💡 Usage Tips"):
             st.markdown("""
             **System Status:**
-            - API Key: ✅ Pre-configured
+            - API: ✅ OpenAI GPT-4.1-mini
+            - Embeddings: 🎯 text-embedding-3-large
             - Memory: 🧠 Learning enabled
             - Sources: 📊 Separated by type
             
@@ -1129,10 +1160,10 @@ def main():
             - Adapts to your question patterns
             """)
     
-    # Chat interface
+    # Chat interface - same as before but with OpenAI indicators
     if st.session_state.documents_loaded and st.session_state.chatbot:
         st.markdown("---")
-        st.header("💬 Chat with AI")
+        st.header("💬 Chat with OpenAI Assistant")
         
         # Display chat history
         for i, message in enumerate(st.session_state.messages):
@@ -1147,7 +1178,7 @@ def main():
                     if metadata.get('is_translation'):
                         st.markdown("""
                         <div class="translation-indicator">
-                            🌐 This is an automatic translation
+                            🌐 This is an automatic translation using OpenAI GPT-4.1-mini
                         </div>
                         """, unsafe_allow_html=True)
                     
@@ -1155,7 +1186,7 @@ def main():
                     if i > 0:  # Not the first message
                         st.markdown("""
                         <div class="memory-indicator">
-                            🧠 Using conversation context and learned preferences
+                            🧠 Using conversation context and learned preferences (GPT-4.1-mini powered)
                         </div>
                         """, unsafe_allow_html=True)
                     
@@ -1172,7 +1203,7 @@ def main():
                         st.caption(f"📚 Sources: {num_sources}")
                     with col_meta4:
                         source_icon = "🗄️" if st.session_state.chatbot.current_source == "drive" else "📤"
-                        st.caption(f"{source_icon} Source: {st.session_state.chatbot.current_source}")
+                        st.caption(f"{source_icon} OpenAI")
                     
                     # Show sources
                     if metadata.get('sources') and not metadata.get('is_translation'):
@@ -1184,7 +1215,7 @@ def main():
                                     <strong>{j}. {source['file_name']}</strong>
                                     {f'<br><a href="{source["web_view_link"]}" target="_blank">🔗 View file</a>' if source.get('web_view_link') else ''}
                                     <br><em>{source['content_preview']}</em>
-                                    <br><small>Source: {source_type}</small>
+                                    <br><small>Source: {source_type} | Powered by OpenAI</small>
                                 </div>
                                 """, unsafe_allow_html=True)
         
@@ -1210,7 +1241,7 @@ def main():
         
         # Chat input
         query = st.chat_input(
-            "Type your question or 'dịch sang [language]'...",
+            "Type your question or 'dịch sang [language]'... (Powered by GPT-4.1-mini)",
             key="chat_input"
         )
         
@@ -1234,7 +1265,7 @@ def main():
             
             # Generate response
             with st.chat_message("assistant"):
-                with st.spinner("🤔 Thinking..."):
+                with st.spinner("🤔 GPT-4.1-mini is thinking..."):
                     try:
                         response = st.session_state.chatbot.chat(query)
                         
@@ -1245,7 +1276,7 @@ def main():
                         if response.get('is_translation'):
                             st.markdown("""
                             <div class="translation-indicator">
-                                🌐 This is an automatic translation
+                                🌐 This is an automatic translation using OpenAI GPT-4.1-mini
                             </div>
                             """, unsafe_allow_html=True)
                         
@@ -1253,7 +1284,7 @@ def main():
                         if len(st.session_state.messages) > 1:  # Not the first conversation
                             st.markdown("""
                             <div class="memory-indicator">
-                                🧠 Using conversation context and learned preferences
+                                🧠 Using conversation context and learned preferences (GPT-4.1-mini powered)
                             </div>
                             """, unsafe_allow_html=True)
                         
@@ -1267,7 +1298,7 @@ def main():
                             st.caption(f"📚 Sources: {response['num_sources']}")
                         with col_meta4:
                             source_icon = "🗄️" if st.session_state.chatbot.current_source == "drive" else "📤"
-                            st.caption(f"{source_icon} Source: {st.session_state.chatbot.current_source}")
+                            st.caption(f"{source_icon} GPT-4.1")
                         
                         # Display sources
                         if response['sources'] and not response.get('is_translation'):
@@ -1279,27 +1310,27 @@ def main():
                                         <strong>{j}. {source['file_name']}</strong>
                                         {f'<br><a href="{source["web_view_link"]}" target="_blank">🔗 View file</a>' if source.get('web_view_link') else ''}
                                         <br><em>{source['content_preview']}</em>
-                                        <br><small>Source: {source_type}</small>
+                                        <br><small>Source: {source_type} | Powered by GPT-4.1-mini</small>
                                     </div>
                                     """, unsafe_allow_html=True)
                         
                         # Learning feedback section
                         st.markdown("---")
-                        st.markdown("**🧠 Help me learn:**")
+                        st.markdown("**🧠 Help GPT-4.1-mini learn:**")
                         feedback_col1, feedback_col2, feedback_col3 = st.columns([1, 1, 3])
                         
                         with feedback_col1:
                             if st.button("👍 Good", key=f"thumbs_up_{len(st.session_state.messages)}"):
                                 st.session_state.chatbot.learn_from_interaction(query, response['answer'], 'positive')
-                                st.success("Thanks! I'll remember this works well.")
+                                st.success("Thanks! GPT-4.1-mini will remember this works well.")
                         
                         with feedback_col2:
                             if st.button("👎 Poor", key=f"thumbs_down_{len(st.session_state.messages)}"):
                                 st.session_state.chatbot.learn_from_interaction(query, response['answer'], 'negative')
-                                st.info("Got it! I'll try to improve.")
+                                st.info("Got it! GPT-4.1-mini will try to improve.")
                         
                         with feedback_col3:
-                            st.caption("Your feedback helps me learn your preferences")
+                            st.caption("Your feedback helps GPT-4.1-mini learn your preferences")
                         
                     except Exception as e:
                         st.error(f"❌ Error processing question: {str(e)}")
@@ -1328,13 +1359,13 @@ def main():
     else:
         # Setup instructions when not connected
         st.markdown("---")
-        st.info("🚀 **Connect to your data source to get started!**")
+        st.info("🚀 **Connect to your data source to get started with GPT-4.1-mini!**")
         
         # Setup checklist
         st.markdown("### ✅ Setup Checklist:")
         
         checklist_items = [
-            ("🔑 API Key configured", bool(FIXED_GEMINI_API_KEY)),
+            ("🔑 OpenAI API Key configured", bool(FIXED_OPENAI_API_KEY and FIXED_OPENAI_API_KEY != "your-openai-api-key-here")),
             ("📄 File types selected", bool(file_types)),
         ]
         
@@ -1356,15 +1387,20 @@ def main():
             st.success("🎉 You're ready! Click 'Connect & Load Documents' above.")
             
             # Show enhanced features
-            st.markdown("### 🆕 Enhanced Features:")
+            st.markdown("### 🆕 Enhanced Features with OpenAI:")
             col_feat1, col_feat2 = st.columns(2)
             
             with col_feat1:
                 st.markdown("""
-                **🤖 Smart Embedding Storage:**
-                - Intelligent caching for embeddings
-                - Separate vector stores by source
-                - Faster loading times
+                **🤖 OpenAI GPT-4.1-mini:**
+                - Latest generation model
+                - Enhanced reasoning capabilities
+                - Better context understanding
+                
+                **🎯 text-embedding-3-large:**
+                - High-quality embeddings
+                - Better semantic search
+                - Improved relevance
                 """)
             
             with col_feat2:
@@ -1378,6 +1414,11 @@ def main():
                 - Multiple language support
                 - Auto language detection
                 - Translation caching
+                
+                **💾 Smart Caching:**
+                - Intelligent embedding storage
+                - Separate vector stores by source
+                - Faster loading times
                 """)
         else:
             st.warning("⚠️ Please complete the checklist before proceeding.")
